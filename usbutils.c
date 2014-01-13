@@ -59,6 +59,7 @@ static cgtimer_t usb11_cgt;
 #define BITFURY_TIMEOUT_MS 999
 #define DRILLBIT_TIMEOUT_MS 999
 #define ICARUS_TIMEOUT_MS 999
+#define KNK_TIMEOUT_MS 999
 
 #ifdef WIN32
 #define BFLSC_TIMEOUT_MS 999
@@ -109,6 +110,18 @@ static struct usb_epinfo bas_epinfos[] = {
 
 static struct usb_intinfo bas_ints[] = {
 	USB_EPS(0, bas_epinfos)
+};
+#endif
+
+#ifdef USE_KNK
+// N.B. transfer size is 512 with USB2.0, but only 64 with USB1.1
+static struct usb_epinfo knk_epinfos[] = {
+	{ LIBUSB_TRANSFER_TYPE_BULK,	64,	EPI(1), 0, 0 },
+	{ LIBUSB_TRANSFER_TYPE_BULK,	64,	EPO(2), 0, 0 }
+};
+
+static struct usb_intinfo knk_ints[] = {
+	USB_EPS(0, knk_epinfos)
 };
 #endif
 
@@ -382,6 +395,32 @@ static struct usb_find_devices find_dev[] = {
 		.iManufacturer = "Drillbit Systems",
 		.iProduct = NULL, /* Can be Thumb or Eight, same driver */
 		INTINFO(drillbit_ints)
+	},
+#endif
+#ifdef USE_KNK
+	{
+		.drv = DRIVER_knk,
+		.name = "KNK",
+		.ident = IDENT_KNK,
+		.idVendor = IDVENDOR_FTDI,
+		.idProduct = 0x6014,
+		.iProduct = "Single RS232-HS",
+		.config = 1,
+		.timeout = KNK_TIMEOUT_MS,
+		.latency = LATENCY_STD,
+		INTINFO(knk_ints)
+	},
+	{
+		.drv = DRIVER_knk,
+		.name = "KNK",
+		.ident = IDENT_KNK,
+		.idVendor = IDVENDOR_FTDI,
+		.idProduct = 0x6014,
+		.iProduct = "UM232H",	// ToDo more/different id strings when with eeprom
+		.config = 1,
+		.timeout = KNK_TIMEOUT_MS,
+		.latency = LATENCY_STD,
+		INTINFO(knk_ints)
 	},
 #endif
 #ifdef USE_MODMINER

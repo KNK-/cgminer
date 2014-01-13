@@ -239,6 +239,7 @@ static inline int fsync (int fd)
 	DRIVER_ADD_COMMAND(knc) \
 	DRIVER_ADD_COMMAND(drillbit) \
 	DRIVER_ADD_COMMAND(bab) \
+	DRIVER_ADD_COMMAND(knk) \
 	DRIVER_ADD_COMMAND(minion) \
 	DRIVER_ADD_COMMAND(avalon)
 

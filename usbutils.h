@@ -152,6 +152,7 @@ enum sub_ident {
 	IDENT_ICA,
 	IDENT_KLN,
 	IDENT_LLT,
+	IDENT_KNK,
 	IDENT_MMQ,
 	IDENT_DRB
 };

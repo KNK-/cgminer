@@ -25,7 +25,7 @@ bin_PROGRAMS	= cgminer
 cgminer_LDFLAGS	= $(PTHREAD_FLAGS)
 cgminer_LDADD	= $(DLOPEN_FLAGS) @LIBCURL_LIBS@ @JANSSON_LIBS@ @PTHREAD_LIBS@ \
 		  @NCURSES_LIBS@ @PDCURSES_LIBS@ @WS2_LIBS@ \
-		  @LIBUSB_LIBS@ @MM_LIBS@ @RT_LIBS@ \
+		  @LIBUSB_LIBS@ @LIBMPSSE_LIBS@ @MM_LIBS@ @RT_LIBS@ \
 		  @MATH_LIBS@ lib/libgnu.a ccan/libccan.a
 
 cgminer_CPPFLAGS += -I$(top_builddir)/lib -I$(top_srcdir)/lib
@@ -94,6 +94,10 @@ endif
 
 if HAS_MINION
 cgminer_SOURCES += driver-minion.c
+endif
+
+if HAS_KNK
+cgminer_SOURCES += driver-knk.c driver-knk.h
 endif
 
 if HAS_MODMINER

@@ -148,6 +148,17 @@ if test "x$bab" = xyes; then
 fi
 AM_CONDITIONAL([HAS_BAB], [test x$bab = xyes])
 
+knk="no"
+
+AC_ARG_ENABLE([knk],
+	[AC_HELP_STRING([--enable-knk],[Compile support for KNK Bitfury (default disabled)])],
+	[knk=$enableval]
+	)
+if test "x$knk" = xyes; then
+	AC_DEFINE([USE_KNK], [1], [Defined to 1 if KNK Bitfury support is wanted])
+fi
+AM_CONDITIONAL([HAS_KNK], [test x$knk = xyes])
+
 bflsc="no"
 
 AC_ARG_ENABLE([bflsc],
@@ -282,7 +293,13 @@ else
 	])
 fi
 
-if test x$avalon$bitforce$bitfury$modminer$bflsc$icarus$hashfast$klondike$drillbit != xnonononononononono; then
+if test x$knk != xno; then
+	LIBMPSSE_LIBS="-lmpsse"
+fi
+AC_SUBST(LIBMPSSE_LIBS)
+AC_SUBST(LIBMPSSE_CFLAGS)
+
+if test x$avalon$bitforce$bitfury$knk$modminer$bflsc$icarus$hashfast$klondike$drillbit != xnononononononononono; then
 	want_usbutils=true
 else
 	want_usbutils=false
@@ -473,6 +490,12 @@ else
 	echo "  BlackArrow.ASICs.....: Disabled"
 fi
 
+if test "x$knk" = xyes; then
+	echo "  KNK_Bitfury.ASICs....: Enabled"
+else
+	echo "  KNK_Bitfury.ASICs....: Disabled"
+fi
+
 if test "x$bflsc" = xyes; then
 	echo "  BFL.ASICs............: Enabled"
 else
@@ -527,7 +550,7 @@ else
 	echo "  ModMiner.FPGAs.......: Disabled"
 fi
 
-if test "x$avalon$bab$bflsc$bitforce$bitfury$hashfast$icarus$klondike$knc$modminer$drillbit$minion" = xnononononononononononono; then
+if test "x$avalon$bab$knk$bflsc$bitforce$bitfury$hashfast$icarus$klondike$knc$modminer$drillbit$minion" = xnonononononononononononono; then
 	AC_MSG_ERROR([No mining configured in])
 fi
 
