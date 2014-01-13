@@ -102,7 +102,6 @@
 #define KNK_DEV_MEM		"/dev/mem"
 #define KNK_MEM_LEN		1024
 #define KNK_MEM_ADDR	0x20200000
-#define KNK_SPIBUF		4096	// RPi default buffer is 4k
 
 #else	// is KNK_MPSSE_SPI
 
@@ -122,6 +121,8 @@
 #define KNK_LED_OFF		PinHigh(knkinfo->mpsse_spi, GPIOH0)
 
 #endif	// KNK_MPSSE_SPI
+
+#define KNK_SPIBUF		4096	// RPi default buffer is 4k. Use for MPSSE too
 
 
 /* driver definitions */

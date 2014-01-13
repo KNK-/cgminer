@@ -115,7 +115,7 @@ static bool knk_init_mpsse(struct cgpu_info *knkcgpu, struct knk_info *knkinfo)
 {
 	struct mpsse_context *mpsse_spi;
 
-	if (knkinfo.initialized) {
+	if (knkinfo->initialized) {
 		Close(knkinfo->mpsse_spi);
 		knkinfo->mpsse_spi = NULL;
 	}
@@ -130,7 +130,7 @@ static bool knk_init_mpsse(struct cgpu_info *knkcgpu, struct knk_info *knkinfo)
 	// On the MPSSE (FTDI) based board by Goodney the CS pin gates the clock for BitFury reset. This will set the pin low.
 	Start(mpsse_spi);
 	knkinfo->mpsse_spi = mpsse_spi;
-	knkinfo.initialized = true;
+	knkinfo->initialized = true;
 
 	return true;
 }
@@ -157,7 +157,7 @@ static struct cgpu_info *knk_detect_mpsse(struct libusb_device *dev, struct usb_
 	applog(LOG_INFO, "%s %d: Found at %s", knkcgpu->drv->name,
 				knkcgpu->device_id, knkcgpu->device_path);
 
-	knkinfo.initialized = false;
+	knkinfo->initialized = false;
 	knkcgpu->device_data = knkinfo;
 	knk_init(knkcgpu);
 
