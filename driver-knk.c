@@ -610,6 +610,56 @@ static void send_full_init(char *spibuf, int *spibufsz)
 	send_bufs_init(spibuf, spibufsz);
 }
 
+static void process_newbuf(uint32_t *oldbuf, uint32_t *newbuf, struct chips_data *chip_info)
+{
+	int8_t pos = chip_info->old_counter_pos;
+	uint32_t counter = chip_info->old_counter_val;
+
+	if ( !memcmp(oldbuf, newbuf, 16*4) || (newbuf[16] != 0xFFFFFFFF && newbuf[16] != 0x00000000) ) {
+		return;
+	}
+
+	if ( pos < 0) {
+		pos = 0;
+	}
+
+	for (; pos < 16; pos++) {
+		if (oldbuf[pos] != newbuf[pos]) {
+			counter = decnonce(newbuf[pos]);
+
+			if (chip_info->old_counter_pos < 0 && newbuf[((!pos) ? 15 : pos)] != 0xF144E61F) {
+				continue;
+			}
+
+			if ((counter & 0xFFC00000) == 0xDF800000) {
+				chip_info->new_counter_val = counter - 0xDF800000;
+				chip_info->new_counter_pos = pos;
+				return;
+			}
+
+			applog(LOG_INFO, "new nonce %d = %x / %x / %x", pos, counter, counter - 0x00800000, counter - 0x00400000);
+		}
+	}
+
+	for (pos=0; chip_info->old_counter_pos > 0 && pos < chip_info->old_counter_pos; pos++) {
+		if (oldbuf[pos] != newbuf[pos]) {
+			counter = decnonce(newbuf[pos]);
+
+			if (chip_info->old_counter_pos < 0 && newbuf[((!pos) ? 15 : pos)] != 0xF144E61F) {
+				continue;
+			}
+
+			if ((counter & 0xFFC00000) == 0xDF800000) {
+				chip_info->new_counter_val = counter - 0xDF800000;
+				chip_info->new_counter_pos = pos;
+				return;
+			}
+
+			applog(LOG_INFO, "new nonce %d = %x / %x / %x", pos, counter, counter - 0x00800000, counter - 0x00400000);
+		}
+	}
+}
+
 static void detect_chips(struct knk_info *knkinfo, uint8_t bank) {
 	uint8_t chip;
 	int tries = KNK_DETECT_RETRIES;
@@ -658,8 +708,8 @@ static void detect_chips(struct knk_info *knkinfo, uint8_t bank) {
 					knkinfo->bank_chip_link[bank][chip] = &knkinfo->chip_data[chip];
 					knkinfo->board_chip_link[bank][board][board_pos] = &knkinfo->chip_data[chip];
 
-					applog(LOG_WARNING, "Chip detected: slot %d, board %d, position %d - chip #%d",
-							bank, board, board_pos, knkinfo->chips);
+					applog(LOG_WARNING, "Chip detected: slot %d, board %d, position %d - chip #%d (SPI speed %d)",
+							bank, board, board_pos, knkinfo->chips, knkinfo->chip_data[chip].spi_speed);
 
 					knkinfo->chips++;
 					chips_found++;
@@ -703,6 +753,7 @@ static void knk_init_chips(struct cgpu_info *knkcgpu, struct knk_info *knkinfo)
 #endif	// KNK_BANKS > 1
 		detect_chips(knkinfo, bank);
 #if KNK_BANKS > 1
+		KNK_BANK_OFF(knk_bank_pins[bank]);
 	}
 #endif
 
@@ -743,6 +794,124 @@ static struct api_data *knk_get_api_stats(struct cgpu_info *knkcgpu)
 	return root;
 }
 
+// Thread to handle SPI communication with the chips
+static void *knk_spi_thread(void *userdata)
+{
+	struct cgpu_info *knkcgpu = (struct cgpu_info *)userdata;
+	struct knk_info *knkinfo = knkcgpu->device_data;
+
+	// ToDo
+}
+
+// Results checking thread
+static void *knk_res_thread(void *userdata)
+{
+	struct cgpu_info *knkcgpu = (struct cgpu_info *)userdata;
+	struct knk_info *knkinfo = knkcgpu->device_data;
+
+	// ToDo
+}
+
+static bool knk_thread_prepare(struct thr_info *thr)
+{
+	struct cgpu_info *knkcgpu = thr->cgpu;
+	struct knk_info *knkinfo = knkcgpu->device_data;
+
+	if (thr_info_create(&(knkinfo->spi_thr), NULL, knk_spi_thread, (void *)knkcgpu)) {
+		applog(LOG_ERR, "%s%i: SPI thread create failed", knkcgpu->drv->name, knkcgpu->device_id);
+		return false;
+	}
+	pthread_detach(knkinfo->spi_thr.pth);
+
+	/*
+	 * We require a separate results checking thread since there is a lot
+	 * of work done checking the results multiple times - thus we don't
+	 * want that delay affecting sending/receiving work to/from the device
+	 */
+	if (thr_info_create(&(knkinfo->res_thr), NULL, knk_res_thread, (void *)knkcgpu)) {
+		applog(LOG_ERR, "%s%i: Results thread create failed", knkcgpu->drv->name, knkcgpu->device_id);
+		return false;
+	}
+	pthread_detach(knkinfo->res_thr.pth);
+
+	return true;
+}
+
+static void knk_shutdown(struct thr_info *thr)
+{
+	struct cgpu_info *knkcgpu = thr->cgpu;
+	struct knk_info *knkinfo = knkcgpu->device_data;
+	char wrbuf[KNK_SPIBUF], rdbuf[KNK_SPIBUF];
+	int bank, chip, spibufsz = 0;
+
+	applog(LOG_DEBUG, "%s%i: shutting down", knkcgpu->drv->name, knkcgpu->device_id);
+
+#if KNK_BANKS > 1
+	for (bank = 0; bank < KNK_BANKS; bank++) {
+		KNK_BANK_ON(knk_bank_pins[bank]);
+#endif	// KNK_BANKS > 1
+		spi_reset(knkinfo, KNK_BANK_CHIPS+1);
+		spi_add_buf(wrbuf, &spibufsz, KNK_BREAK,1);
+		for (chip = 0; chip < KNK_BANK_CHIPS; chip++) {
+			config_reg(wrbuf, &spibufsz, 4, 0);		/* Disable slow oscillator which stops the chip */
+			spi_add_buf(wrbuf, &spibufsz, KNK_ASYNC,1);
+		}
+		spi_txrx(knkinfo, wrbuf, rdbuf, spibufsz, KNK_SPI_INIT_SPEED);
+#if KNK_BANKS > 1
+		KNK_BANK_OFF(knk_bank_pins[bank]);
+	}
+#endif
+
+	knkcgpu->shutdown = true;
+#ifdef KNK_MPSSE_SPI
+	knkcgpu->initialized = false;
+#endif
+}
+
+#if ToDo
+static BLIST *store_work(struct cgpu_info *knkcgpu, struct work *work)
+{
+	// ToDo
+	return NULL;
+}
+#endif
+
+static bool knk_queue_full(struct cgpu_info *knkcgpu)
+{
+	struct knk_info *knkinfo = (knkcgpu->device_data);
+	struct work *work;
+
+	if (knkinfo->work_queue_count >= knkinfo->chips) {
+		return true;
+	}
+
+	if ( (work = get_queued(knkcgpu)) ) {
+//		store_work(knkcgpu, work);
+		return true;
+	}
+
+	// Avoid a hard loop when we can't get work fast enough
+	cgsleep_ms(10);
+	return false;
+}
+
+static int64_t knk_scanwork(__maybe_unused struct thr_info *thr)
+{
+	struct cgpu_info *knkcgpu = thr->cgpu;
+	struct knk_info *knkinfo = knkcgpu->device_data;
+	int64_t hashcount = 0;
+
+	// ToDo
+
+	return hashcount;
+}
+
+static void knk_flush_work(struct cgpu_info *knkcgpu)
+{
+	struct knk_info *knkinfo = knkcgpu->device_data;
+
+	// ToDo
+}
 
 struct device_drv knk_drv = {
 	.drv_id = DRIVER_knk,
@@ -756,20 +925,13 @@ struct device_drv knk_drv = {
 	.reinit_device = knk_init,
 	.identify_device = knk_identify,
 
-	.get_api_stats = knk_get_api_stats,
-
-#ifdef ToDo
 	.thread_prepare = knk_thread_prepare,
-	.thread_init = knk_thread_init,
-	.thread_shutdown = knk_shutdown
-	.thread_enable = knk_thread_enable
+	.thread_shutdown = knk_shutdown,
 
-	.scanhash = knk_scanhash,
-//	.hash_work = hash_queued_work,
-//	.hash_work = &hash_driver_work,
 	.scanwork = knk_scanwork,
+	.hash_work = hash_queued_work,
 	.flush_work = knk_flush_work,
-	.update_work = knk_update_work,
 	.queue_full = knk_queue_full,
-#endif
+
+	.get_api_stats = knk_get_api_stats,
 };

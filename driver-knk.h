@@ -55,9 +55,8 @@
 #define KNK_SPI_WORD_BITS		8
 #define KNK_SPI_MAX_SPEED		5000000								// Maximum speed the hardware is capable of
 #define KNK_SPI_INIT_SPEED		200000
-#define KNK_SPI_CHIP_DELAY		5000								// Per chip propagation delay in ns
-#define KNK_SPI_CHIP_SPDDEC		(1000000000/(2*KNK_SPI_CHIP_DELAY))	// Per chip decrease of the SPI speed in HZ
-#define KNK_SPI_CHIP_SPD(_n)	(KNK_SPI_MAX_SPEED - KNK_SPI_CHIP_SPDDEC * (_n))
+#define KNK_SPI_CHIP_DELAY		4									// Per chip propagation delay in ns
+#define KNK_SPI_CHIP_SPD(_n)	(1000000.0/(1000000.0/KNK_SPI_MAX_SPEED + 2.0 * KNK_SPI_CHIP_DELAY * (_n) / 1000))
 
 
 /* Mining Host definitions */
@@ -139,6 +138,11 @@ struct chips_data {
 
 	bool reinit;
 	bool present;
+
+	int8_t old_counter_pos;
+	int8_t new_counter_pos;
+	uint32_t old_counter_val;
+	uint32_t new_counter_val;
 };
 
 #define KNK_SPI_BUFFERS	2	// 1 for current txrx, 1 for the next and IF we need 1 for overflow
@@ -165,11 +169,16 @@ struct knk_info {
 	struct chips_data *bank_chip_link[KNK_BANKS][KNK_BANK_CHIPS];
 	struct chips_data *board_chip_link[KNK_BANKS][KNK_BANK_BOARDS][KNK_BOARD_CHIPS];
 
+	int work_queue_count;
+	// ToDo queue details
+
+#if 0 // ToDo
 	int buffer;
 	int buf_status[KNK_SPI_BUFFERS];
 	uint8_t buf_write[KNK_SPI_BUFFERS][KNK_MAXBUF];
 	uint8_t buf_read[KNK_SPI_BUFFERS][KNK_MAXBUF];
 	uint32_t buf_used[KNK_SPI_BUFFERS];
+#endif
 };
 
 
