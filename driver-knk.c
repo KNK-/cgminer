@@ -98,6 +98,17 @@ static const uint32_t knk_test_work[19] = {
 	//	nonce	0xf0c4e61f = 0xf144e61f - 0x00800000
 };
 
+enum scan_strategy {
+	SCAN_BANK,
+	SCAN_BOARD,
+	SCAN_CHIP,
+};
+
+enum scan_strategy scan_strategy = 	SCAN_BANK;
+int scan_last_bank = 0;
+int scan_last_board = 0;
+int scan_last_chip = 0;
+
 
 #ifdef KNK_MPSSE_SPI
 
@@ -355,6 +366,7 @@ static bool knk_init_gpio(struct cgpu_info *knkcgpu, struct knk_info *knkinfo)
 		}
 	}
 
+	knkinfo->initialized = true;
 	return true;
 
 close_out:
@@ -388,6 +400,7 @@ static void knk_detect_spidev(void)
 	knkcgpu->deven = DEV_ENABLED;
 	knkcgpu->threads = 1;
 	knkcgpu->device_data = (void *)knkinfo;
+	knkinfo->initialized = false;
 
 	knk_init(knkcgpu);
 }
@@ -676,7 +689,7 @@ static void detect_chips(struct knk_info *knkinfo, uint8_t bank) {
 		spi_reset(knkinfo, KNK_BANK_CHIPS+1);
 		spi_add_buf(wrbuf, &spibufsz, KNK_BREAK,1);
 		for (chip = 0; chip < KNK_BANK_CHIPS; chip++) {
-			if ( !knkinfo->chip_data[chip].present ) {
+			if ( !knkinfo->chip_data[knkinfo->chips].present ) {
 				send_full_init(wrbuf, &spibufsz);
 				spi_txrx(knkinfo, wrbuf, rdbuf, spibufsz, KNK_SPI_INIT_SPEED);
 				spibufsz = 0;
@@ -697,19 +710,20 @@ static void detect_chips(struct knk_info *knkinfo, uint8_t bank) {
 					uint8_t board = chip / KNK_BOARD_CHIPS;
 					uint8_t board_pos = chip % KNK_BOARD_CHIPS;
 
-					knkinfo->chip_data[chip].bank_pos = chip;
-					knkinfo->chip_data[chip].bank = bank;
-					knkinfo->chip_data[chip].board = board;
-					knkinfo->chip_data[chip].board_pos = board_pos;
-					knkinfo->chip_data[chip].present = true;
-					knkinfo->chip_data[chip].reinit = false;
-					knkinfo->chip_data[chip].spi_speed = KNK_SPI_CHIP_SPD(chip);
+					knkinfo->chip_data[knkinfo->chips].bank_pos = chip;
+					knkinfo->chip_data[knkinfo->chips].bank = bank;
+					knkinfo->chip_data[knkinfo->chips].board = board;
+					knkinfo->chip_data[knkinfo->chips].board_pos = board_pos;
+					knkinfo->chip_data[knkinfo->chips].present = true;
+					knkinfo->chip_data[knkinfo->chips].reinit = false;
+					knkinfo->chip_data[knkinfo->chips].spi_speed = KNK_SPI_CHIP_SPD(chip);
+					mutex_init(&knkinfo->chip_data[knkinfo->chips].buf_lock);
 
-					knkinfo->bank_chip_link[bank][chip] = &knkinfo->chip_data[chip];
-					knkinfo->board_chip_link[bank][board][board_pos] = &knkinfo->chip_data[chip];
+					knkinfo->bank_chip_link[bank][chip] = &knkinfo->chip_data[knkinfo->chips];
+					knkinfo->board_chip_link[bank][board][board_pos] = &knkinfo->chip_data[knkinfo->chips];
 
 					applog(LOG_WARNING, "Chip detected: slot %d, board %d, position %d - chip #%d (SPI speed %d)",
-							bank, board, board_pos, knkinfo->chips, knkinfo->chip_data[chip].spi_speed);
+							bank, board, board_pos, knkinfo->chips, knkinfo->chip_data[knkinfo->chips].spi_speed);
 
 					knkinfo->chips++;
 					chips_found++;
@@ -789,9 +803,84 @@ static struct api_data *knk_get_api_stats(struct cgpu_info *knkcgpu)
 		root = api_add_uint8(root, buf, &(chip_info.osc_bits), false);
 
 //	ToDo add others
+//		root = api_add_temp(root, "Temp", &(knkinfo->temp), true);
 	}
 
 	return root;
+}
+
+static void fix_nonce(uint32_t got_nonce, struct chips_data chip_info, struct thr_info res_thr)
+{
+	uint32_t nonce = dec_nonce(got_nonce);
+	uint32_t coor;
+	int x, y;
+	struct work *work;
+
+	if ( (got_nonce & 0xFF) < 0x1C) {
+		nonce -= 0x400000;
+		coor = ( ((nonce >> 29) & 0x07) | ((nonce >> 19) & 0x3F8) );
+		x = coor % 24;
+		y = coor / 24;
+		if ( y < 36 ) {
+			// 3 out of 24 cases
+
+// ToDo the nonce is OK - check if for the current or old work
+//			if ( chip_info.current_nonce_high ^ chip_info.current_job_high && test_nonce(new_work, nonce) ) {
+//				chip_info.current_nonce_high ^= 1;
+//			}
+
+			if ( submit_nonce(&res_thr, work, nonce) ) {
+			// Store good or bad in chip info per core
+				chip_info.ok_nonces++;
+				chip_info.ok_core_nonces[x][y]++;
+				return;
+			} else {
+				chip_info.hw_core_nonces[x][y]++;
+			}
+		}
+	} else {
+		coor = ( ((nonce >> 29) & 0x07) | ((nonce >> 19) & 0x3F8) );
+		x = coor % 24;
+		y = coor / 24;
+		if ( x >= 17 && y < 36 ) {
+			// 7 out of 24 cases
+
+// ToDo the nonce is OK - check if for the current or old work
+
+			if ( submit_nonce(&res_thr, work, nonce) ) {
+			// Store good or bad in chip info per core
+				chip_info.ok_nonces++;
+				chip_info.ok_core_nonces[x][y]++;
+				return;
+			} else {
+				chip_info.hw_core_nonces[x][y]++;
+			}
+		}
+
+		nonce -= 0x800000;
+		coor = ( ((nonce >> 29) & 0x07) | ((nonce >> 19) & 0x3F8) );
+		x = coor % 24;
+		y = coor / 24;
+		if ( y < 36 && ((x >= 1 && x <= 4) || (x >= 9 && x <= 15)) ) {
+			// 11 out of 24 cases
+
+// ToDo the nonce is OK - check if for the current or old work
+
+			if ( submit_nonce(&res_thr, work, nonce) ) {
+			// Store good or bad in chip info per core
+				chip_info.ok_nonces++;
+				chip_info.ok_core_nonces[x][y]++;
+				return;
+			} else {
+				chip_info.hw_core_nonces[x][y]++;
+			}
+		}
+	}
+
+	// Bad core or invalid nonce
+	chip_info.hw_nonces++;
+	inc_hw_errors(&res_thr);
+	return;
 }
 
 // Thread to handle SPI communication with the chips
@@ -799,8 +888,26 @@ static void *knk_spi_thread(void *userdata)
 {
 	struct cgpu_info *knkcgpu = (struct cgpu_info *)userdata;
 	struct knk_info *knkinfo = knkcgpu->device_data;
+	struct timeval start_time, stop_time;
 
-	// ToDo
+	// Wait until we're ready
+	while (!knkcgpu->shutdown || !knkinfo->initialized) {
+		cgsleep_ms(1000);
+	}
+
+	while (!knkcgpu->shutdown) {
+		mutex_lock(&knkinfo->spi_lock);
+		cgtime(&start_time);
+
+	// ToDo (bank/board/chip) strategy based SPI communication
+	// Use buf_lock for each chip
+
+		cgtime(&stop_time);
+		mutex_unlock(&knkinfo->spi_lock);
+		if ( ms_tdiff(&start_time, &stop_time) < 1) {
+			cgsleep_ms(1);
+		}
+	}
 }
 
 // Results checking thread
@@ -809,7 +916,8 @@ static void *knk_res_thread(void *userdata)
 	struct cgpu_info *knkcgpu = (struct cgpu_info *)userdata;
 	struct knk_info *knkinfo = knkcgpu->device_data;
 
-	// ToDo
+	// ToDo walktrough the banks, boards, chips and process the buffers
+	// Use buf_lock for each chip
 }
 
 static bool knk_thread_prepare(struct thr_info *thr)
@@ -845,6 +953,7 @@ static void knk_shutdown(struct thr_info *thr)
 	int bank, chip, spibufsz = 0;
 
 	applog(LOG_DEBUG, "%s%i: shutting down", knkcgpu->drv->name, knkcgpu->device_id);
+	mutex_lock(&knkinfo->spi_lock);
 
 #if KNK_BANKS > 1
 	for (bank = 0; bank < KNK_BANKS; bank++) {
@@ -862,10 +971,16 @@ static void knk_shutdown(struct thr_info *thr)
 	}
 #endif
 
+	for (chip = 0; chip < KNK_MAXCHIPS; chip++) {
+		if (knkinfo->chip_data[chip].present) {
+			mutex_destroy(&knkinfo->chip_data[chip].buf_lock);
+			memset(&knkinfo->chip_data[chip], 0, sizeof(struct chips_data));
+		}
+	}
+
 	knkcgpu->shutdown = true;
-#ifdef KNK_MPSSE_SPI
-	knkcgpu->initialized = false;
-#endif
+	knkinfo->initialized = false;
+	mutex_unlock(&knkinfo->spi_lock);
 }
 
 #if ToDo
@@ -886,7 +1001,7 @@ static bool knk_queue_full(struct cgpu_info *knkcgpu)
 	}
 
 	if ( (work = get_queued(knkcgpu)) ) {
-//		store_work(knkcgpu, work);
+//		store_work(knkcgpu, work);	// ToDo
 		return true;
 	}
 
@@ -901,7 +1016,8 @@ static int64_t knk_scanwork(__maybe_unused struct thr_info *thr)
 	struct knk_info *knkinfo = knkcgpu->device_data;
 	int64_t hashcount = 0;
 
-	// ToDo
+	// ToDo we don't want to do SPI here, what should trigger a return value?
+	// Do we just send back nonces from completed works?
 
 	return hashcount;
 }
@@ -910,7 +1026,7 @@ static void knk_flush_work(struct cgpu_info *knkcgpu)
 {
 	struct knk_info *knkinfo = knkcgpu->device_data;
 
-	// ToDo
+	// ToDo free all works not sent to chips yet and mark the rest as 'stale'
 }
 
 struct device_drv knk_drv = {

@@ -138,11 +138,25 @@ struct chips_data {
 
 	bool reinit;
 	bool present;
+	pthread_mutex_t buf_lock;
 
+	uint32_t oldbuf[17];
+	uint32_t newbuf[17];
 	int8_t old_counter_pos;
 	int8_t new_counter_pos;
 	uint32_t old_counter_val;
 	uint32_t new_counter_val;
+	struct timeval old_time;
+	struct timeval new_time;
+
+	bool current_nonce_high;
+	bool current_job_high;
+	// ToDo chip jobs
+
+	uint32_t ok_nonces;
+	uint32_t hw_nonces;
+	uint32_t ok_core_nonces[KNK_CHIP_X_CORES][KNK_CHIP_Y_CORES];
+	uint32_t hw_core_nonces[KNK_CHIP_X_CORES][KNK_CHIP_Y_CORES];
 };
 
 #define KNK_SPI_BUFFERS	2	// 1 for current txrx, 1 for the next and IF we need 1 for overflow
@@ -159,9 +173,9 @@ struct knk_info {
 	int spi_fd;
 #else
 	struct mpsse_context *mpsse_spi;
-	bool initialized;
 #endif
 
+	bool initialized;
 	struct timeval toggle_led;
 
 	int chips;
