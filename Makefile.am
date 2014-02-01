@@ -43,12 +43,18 @@ cgminer_SOURCES	+= elist.h miner.h compat.h bench_block.h	\
 
 cgminer_SOURCES	+= logging.c
 
+cgminer_SOURCES	+= klist.h klist.c
+
 if NEED_FPGAUTILS
 cgminer_SOURCES += fpgautils.c fpgautils.h
 endif
 
 if WANT_USBUTILS
 cgminer_SOURCES += usbutils.c usbutils.h
+endif
+
+if WANT_LIBBITFURY
+cgminer_SOURCES += libbitfury.c libbitfury.h mcp2210.c mcp2210.h
 endif
 
 # Device drivers
